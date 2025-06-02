@@ -2,127 +2,90 @@ import os
 import pandas as pd
 import numpy as np
 import yfinance as yf
-from binance.spot import Spot
 import requests
 import telegram
 from datetime import datetime
-import pytz
 
-# ===== CONFIGURATION =====
-TELEGRAM_TOKEN = os.environ['TELEGRAM_TOKEN']
-CHAT_ID = os.environ['CHAT_ID']
+# Configuration
+TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
+CHAT_ID = os.getenv('CHAT_ID')
 
-# Risk Management
-SL_MULTIPLIER = 0.75
-TP1_MULTIPLIER = 1.5
-TP2_MULTIPLIER = 2.5
-
-# Assets
-STOCKS = ['SPY', 'QQQ']
-CRYPTO = ['BTCUSDT', 'ETHUSDT']
-FOREX = ['EURUSD', 'USDJPY']
-
-# Sensitivity
-MIN_VOLUME_RATIO = 2.5
-MIN_PRICE_CHANGE = 0.003
+# Trading parameters
+PARAMS = {
+    'stocks': ['SPY', 'QQQ'],
+    'crypto': ['BTC-USD', 'ETH-USD'],  # Using yfinance format
+    'min_volume_ratio': 2.0,
+    'min_price_change': 0.002,
+    'sl_multiplier': 0.75,
+    'tp_multiplier': 1.5
+}
 
 bot = telegram.Bot(token=TELEGRAM_TOKEN)
 
-def get_sessions():
-    utc_hour = datetime.utcnow().hour
-    sessions = []
-    if 0 <= utc_hour < 9: sessions.append('Asian')
-    if 8 <= utc_hour < 17: sessions.append('London')
-    if 13 <= utc_hour < 22: sessions.append('New York')
-    return sessions
+def get_market_session():
+    """Determine current market session"""
+    hour = datetime.utcnow().hour
+    if 0 <= hour < 9: return 'Asian'
+    if 8 <= hour < 17: return 'London'
+    if 13 <= hour < 22: return 'New York'
+    return 'After Hours'
 
-def calculate_atr(data):
-    high = data['High']
-    low = data['Low']
-    close = data['Close']
-    tr = pd.concat([high-low, 
-                   abs(high-close.shift()), 
-                   abs(low-close.shift())], axis=1).max(axis=1)
-    return tr.rolling(14).mean().iloc[-1]
+def calculate_volatility(data):
+    """Simplified volatility calculation"""
+    highs = data['High']
+    lows = data['Low']
+    closes = data['Close']
+    tr = pd.concat([highs-lows, 
+                   abs(highs-closes.shift()), 
+                   abs(lows-closes.shift())], axis=1).max(axis=1)
+    return tr.rolling(14).mean().iloc[-1] / closes.iloc[-1]
 
-def scan_market(symbol, asset_type):
+def scan_market(symbol):
+    """Scan a single market for opportunities"""
     try:
-        if asset_type == 'crypto':
-            client = Spot()
-            klines = client.klines(symbol, '5m', limit=20)
-            if len(klines) < 20: return None
-            
-            closes = [float(k[4]) for k in klines]
-            entry = closes[-1]
-            change = (closes[-1] - closes[-2]) / closes[-2]
-            volumes = [float(k[5]) for k in klines]
-            vol_ratio = volumes[-1] / np.mean(volumes[:-1])
-            
-            # Simplified ATR calculation
-            highs = [float(k[2]) for k in klines]
-            lows = [float(k[3]) for k in klines]
-            atr = calculate_atr(pd.DataFrame({'High': highs, 'Low': lows, 'Close': closes}))
-            
-        else:  # stocks/forex
-            if asset_type == 'forex': symbol += "=X"
-            data = yf.download(symbol, period='1d', interval='5m', progress=False)
-            if len(data) < 15: return None
-            
-            entry = data['Close'].iloc[-1]
-            change = (data['Close'].iloc[-1] - data['Open'].iloc[-1]) / data['Open'].iloc[-1]
-            vol_ratio = data['Volume'].iloc[-1] / data['Volume'].iloc[:-1].mean()
-            atr = calculate_atr(data)
+        data = yf.download(symbol, period='1d', interval='5m', progress=False)
+        if len(data) < 15: return None
         
-        if vol_ratio >= MIN_VOLUME_RATIO and abs(change) >= MIN_PRICE_CHANGE:
-            direction = 'LONG' if change > 0 else 'SHORT'
-            volatility = atr / entry
+        # Calculate metrics
+        current = data.iloc[-1]
+        prev_avg_volume = data['Volume'].iloc[:-1].mean()
+        vol_ratio = current['Volume'] / prev_avg_volume
+        price_change = (current['Close'] - current['Open']) / current['Open']
+        
+        if vol_ratio >= PARAMS['min_volume_ratio'] and abs(price_change) >= PARAMS['min_price_change']:
+            direction = 'LONG' if price_change > 0 else 'SHORT'
+            volatility = calculate_volatility(data)
+            entry = round(current['Close'], 4)
             
-            # Calculate TP/SL
+            # Calculate risk levels
             if direction == 'LONG':
-                sl = entry * (1 - volatility * SL_MULTIPLIER)
-                tp1 = entry * (1 + volatility * TP1_MULTIPLIER)
-                tp2 = entry * (1 + volatility * TP2_MULTIPLIER)
+                sl = entry * (1 - volatility * PARAMS['sl_multiplier'])
+                tp = entry * (1 + volatility * PARAMS['tp_multiplier'])
             else:
-                sl = entry * (1 + volatility * SL_MULTIPLIER)
-                tp1 = entry * (1 - volatility * TP1_MULTIPLIER)
-                tp2 = entry * (1 - volatility * TP2_MULTIPLIER)
-                
+                sl = entry * (1 + volatility * PARAMS['sl_multiplier'])
+                tp = entry * (1 - volatility * PARAMS['tp_multiplier'])
+            
             return {
-                'symbol': symbol.replace("=X", ""),
-                'entry': round(entry, 4),
+                'symbol': symbol,
+                'entry': entry,
                 'direction': direction,
                 'sl': round(sl, 4),
-                'tp1': round(tp1, 4),
-                'tp2': round(tp2, 4),
-                'session': get_sessions()
+                'tp': round(tp, 4),
+                'session': get_market_session()
             }
-            
     except Exception as e:
         print(f"Error scanning {symbol}: {str(e)}")
     return None
 
 def generate_signals():
+    """Generate trading signals for all markets"""
     signals = []
-    for symbol in STOCKS:
-        if signal := scan_market(symbol, 'stock'):
+    for symbol in PARAMS['stocks'] + PARAMS['crypto']:
+        if signal := scan_market(symbol):
             signals.append(signal)
-    for symbol in CRYPTO:
-        if signal := scan_market(symbol, 'crypto'):
-            signals.append(signal)
-    for symbol in FOREX:
-        if signal := scan_market(symbol, 'forex'):
-            signals.append(signal)
-    return signals[:5]  # Limit to 5 signals
+    return signals[:3]  # Return max 3 best signals
 
 def send_signals(signals):
+    """Send signals to Telegram"""
     for signal in signals:
-        msg = f"""🚀 *TRADE SIGNAL* {'🔼' if signal['direction'] == 'LONG' else '🔽'}
-Symbol: {signal['symbol']}
-Entry: {signal['entry']}
-Direction: {signal['direction']}
-Stop Loss: {signal['sl']}
-Take Profit 1: {signal['tp1']}
-Take Profit 2: {signal['tp2']}
-Session: {', '.join(signal['session'])}
-"""
-        bot.sendMessage(chat_id=CHAT_ID, text=msg, parse_mode=telegram.ParseMode.MARKDOWN)
+        msg = f"""📈 *Trade Signal* {'🔼' if signal['direction'] == 'LONG' else '🔽'}
