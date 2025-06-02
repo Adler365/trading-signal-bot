@@ -117,3 +117,12 @@ def generate_signals():
 def send_signals(signals):
     for signal in signals:
         msg = f"""🚀 *TRADE SIGNAL* {'🔼' if signal['direction'] == 'LONG' else '🔽'}
+Symbol: {signal['symbol']}
+Entry: {signal['entry']}
+Direction: {signal['direction']}
+Stop Loss: {signal['sl']}
+Take Profit 1: {signal['tp1']}
+Take Profit 2: {signal['tp2']}
+Session: {', '.join(signal['session'])}
+"""
+        bot.sendMessage(chat_id=CHAT_ID, text=msg, parse_mode=telegram.ParseMode.MARKDOWN)
