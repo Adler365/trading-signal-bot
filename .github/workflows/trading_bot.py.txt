@@ -1,0 +1,179 @@
+import os
+import pandas as pd
+import yfinance as yf
+from binance.spot import Spot
+import requests
+import telegram
+from datetime import datetime, timedelta
+
+# Config
+STOCK_SYMBOLS = ['SPY', 'QQQ', 'TSLA', 'NVDA', 'GOLD']
+CRYPTO_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'XRPUSDT', 'SOLUSDT']
+FOREX_PAIRS = ['EURUSD', 'USDJPY', 'GBPUSD', 'XAUUSD']
+COMMODITIES = ['CL=F', 'GC=F', 'SI=F', 'NG=F']
+
+# Telegram setup
+TELEGRAM_TOKEN = os.environ['TELEGRAM_TOKEN']
+CHAT_ID = os.environ['CHAT_ID']
+bot = telegram.Bot(token=TELEGRAM_TOKEN)
+
+def get_market_session():
+    """Detect active trading sessions"""
+    sessions = []
+    utc_hour = datetime.utcnow().hour
+    
+    # Asian session (00:00-09:00 UTC)
+    if 0 <= utc_hour < 9:
+        sessions.append('Asian')
+    
+    # London session (08:00-17:00 UTC)
+    if 8 <= utc_hour < 17:
+        sessions.append('London')
+    
+    # New York session (13:00-22:00 UTC)
+    if 13 <= utc_hour < 22:
+        sessions.append('New York')
+    
+    return sessions
+
+def scan_stock(symbol):
+    """Scan stock for trading signals"""
+    try:
+        data = yf.download(symbol, period='1d', interval='5m', progress=False)
+        if len(data) < 20: 
+            return None
+            
+        # Volume spike detection
+        avg_volume = data['Volume'].iloc[:-1].mean()
+        current_volume = data['Volume'].iloc[-1]
+        volume_ratio = current_volume / avg_volume
+        
+        # Price movement
+        price_change = (data['Close'].iloc[-1] - data['Open'].iloc[-1]) / data['Open'].iloc[-1]
+        
+        if volume_ratio > 2.5 and abs(price_change) > 0.003:
+            return {
+                'symbol': symbol,
+                'entry': round(data['Close'].iloc[-1], 4),
+                'direction': 'LONG' if price_change > 0 else 'SHORT',
+                'volume_ratio': round(volume_ratio, 2),
+                'session': get_market_session(),
+                'type': 'Stock'
+            }
+    except:
+        return None
+
+def scan_crypto(symbol):
+    """Scan cryptocurrency for signals"""
+    try:
+        client = Spot()
+        klines = client.klines(symbol, '5m', limit=20)
+        
+        if len(klines) < 20:
+            return None
+            
+        # Extract volumes
+        volumes = [float(k[5]) for k in klines]
+        avg_volume = sum(volumes[:-1]) / len(volumes[:-1])
+        current_volume = volumes[-1]
+        volume_ratio = current_volume / avg_volume
+        
+        # Price change
+        price_change = (float(klines[-1][4]) - float(klines[-1][1])) / float(klines[-1][1])
+        
+        if volume_ratio > 2.5 and abs(price_change) > 0.003:
+            return {
+                'symbol': symbol,
+                'entry': round(float(klines[-1][4]), 4),
+                'direction': 'LONG' if price_change > 0 else 'SHORT',
+                'volume_ratio': round(volume_ratio, 2),
+                'session': get_market_session(),
+                'type': 'Crypto'
+            }
+    except:
+        return None
+
+def scan_forex(symbol):
+    """Scan forex pair for signals (price-based only)"""
+    try:
+        # Get current price
+        response = requests.get(f'https://www.freeforexapi.com/api/live?pairs={symbol}')
+        data = response.json()
+        
+        if 'rates' not in data or symbol not in data['rates']:
+            return None
+            
+        current_price = data['rates'][symbol]['rate']
+        
+        # Placeholder for price change detection
+        # In real usage, you'd compare with previous data
+        price_change = 0.005  # Simulated change
+        
+        if abs(price_change) > 0.003:
+            return {
+                'symbol': symbol,
+                'entry': round(current_price, 4),
+                'direction': 'LONG' if price_change > 0 else 'SHORT',
+                'volume_ratio': 0,  # Not available
+                'session': get_market_session(),
+                'type': 'Forex'
+            }
+    except:
+        return None
+
+def scan_commodity(symbol):
+    """Scan commodity futures"""
+    return scan_stock(symbol)  # Uses same logic as stocks
+
+def generate_signals():
+    """Generate trading signals"""
+    signals = []
+    
+    # Scan all markets
+    for symbol in STOCK_SYMBOLS:
+        if signal := scan_stock(symbol):
+            signals.append(signal)
+    
+    for symbol in CRYPTO_SYMBOLS:
+        if signal := scan_crypto(symbol):
+            signals.append(signal)
+    
+    for symbol in FOREX_PAIRS:
+        if signal := scan_forex(symbol):
+            signals.append(signal)
+    
+    for symbol in COMMODITIES:
+        if signal := scan_commodity(symbol):
+            signals.append(signal)
+    
+    # Sort by strongest signal
+    signals.sort(key=lambda x: x['volume_ratio'], reverse=True)
+    return signals[:1]  # Return top 1 signal per run
+
+def send_telegram_signals(signals):
+    """Send formatted signals to Telegram"""
+    for signal in signals:
+        message = (
+            f"🚀 *TRADE SIGNAL* 🚀\n"
+            f"```\n"
+            f"Type: {signal['type']}\n"
+            f"Asset: {signal['symbol']}\n"
+            f"Direction: {signal['direction']}\n"
+            f"Entry: {signal['entry']}\n"
+            f"Volume Spike: {signal.get('volume_ratio', 'N/A')}x\n"
+            f"Session: {', '.join(signal['session'])}\n"
+            f"Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC\n"
+            f"```"
+        )
+        bot.send_message(
+            chat_id=CHAT_ID,
+            text=message,
+            parse_mode='MarkdownV2'
+        )
+
+if __name__ == "__main__":
+    signals = generate_signals()
+    if signals:
+        send_telegram_signals(signals)
+    else:
+        print("No signals found")
