@@ -18,7 +18,9 @@ jobs:
         
     - name: Install dependencies
       run: |
-        pip install yfinance python-binance requests python-telegram-bot pandas
+        sudo apt-get install libatlas-base-dev  # Required for TA-Lib
+        pip install yfinance python-binance requests python-telegram-bot pandas numpy
+        pip install TA-Lib  # Technical analysis library
         
     - name: Run trading bot
       run: python trading_bot.py
