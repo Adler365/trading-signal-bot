@@ -7,8 +7,21 @@ import telegram
 from datetime import datetime
 
 # Configuration
-TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
-CHAT_ID = os.getenv('CHAT_ID')
+try:
+    TELEGRAM_TOKEN = os.environ['TELEGRAM_TOKEN']
+    CHAT_ID = os.environ['CHAT_ID']
+    bot = telegram.Bot(token=TELEGRAM_TOKEN)
+except KeyError as e:
+    print(f"Missing environment variable: {e}")
+    exit(1)
+except telegram.error.InvalidToken:
+    print("Invalid Telegram token. Please check your TELEGRAM_TOKEN")
+    exit(1)
+except Exception as e:
+    print(f"Error initializing bot: {e}")
+    exit(1)
+
+print("Bot initialized successfully!")
 
 # Trading parameters
 PARAMS = {
