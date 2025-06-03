@@ -13,7 +13,7 @@ CHAT_ID = os.getenv('CHAT_ID')
 # Trading parameters
 PARAMS = {
     'stocks': ['SPY', 'QQQ'],
-    'crypto': ['BTC-USD', 'ETH-USD'],  # Using yfinance format
+    'crypto': ['BTC-USD', 'ETH-USD'],
     'min_volume_ratio': 2.0,
     'min_price_change': 0.002,
     'sl_multiplier': 0.75,
@@ -46,7 +46,6 @@ def scan_market(symbol):
         data = yf.download(symbol, period='1d', interval='5m', progress=False)
         if len(data) < 15: return None
         
-        # Calculate metrics
         current = data.iloc[-1]
         prev_avg_volume = data['Volume'].iloc[:-1].mean()
         vol_ratio = current['Volume'] / prev_avg_volume
@@ -57,7 +56,6 @@ def scan_market(symbol):
             volatility = calculate_volatility(data)
             entry = round(current['Close'], 4)
             
-            # Calculate risk levels
             if direction == 'LONG':
                 sl = entry * (1 - volatility * PARAMS['sl_multiplier'])
                 tp = entry * (1 + volatility * PARAMS['tp_multiplier'])
@@ -83,9 +81,31 @@ def generate_signals():
     for symbol in PARAMS['stocks'] + PARAMS['crypto']:
         if signal := scan_market(symbol):
             signals.append(signal)
-    return signals[:3]  # Return max 3 best signals
+    return signals[:3]
 
 def send_signals(signals):
     """Send signals to Telegram"""
     for signal in signals:
-        msg = f"""📈 *Trade Signal* {'🔼' if signal['direction'] == 'LONG' else '🔽'}
+        emoji = '🔼' if signal['direction'] == 'LONG' else '🔽'
+        msg = (
+            f"📈 *Trade Signal* {emoji}\n"
+            f"```\n"
+            f"Asset: {signal['symbol']}\n"
+            f"Direction: {signal['direction']}\n"
+            f"Entry: {signal['entry']}\n"
+            f"SL: {signal['sl']}\n"
+            f"TP: {signal['tp']}\n"
+            f"Session: {signal['session']}\n"
+            f"Time: {datetime.utcnow().strftime('%H:%M UTC')}\n"
+            f"```"
+        )
+        bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode='MarkdownV2')
+
+if __name__ == "__main__":
+    print(f"{datetime.utcnow()} - Starting scan...")
+    signals = generate_signals()
+    if signals:
+        send_signals(signals)
+        print(f"Sent {len(signals)} signals")
+    else:
+        print("No signals found")
