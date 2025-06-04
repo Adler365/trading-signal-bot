@@ -1,25 +1,27 @@
-name: Trading Bot
+name: Telegram Bot Test
 on: 
-  schedule:
-    - cron: '0 * * * *'  # Every hour at :00
   workflow_dispatch:
+  schedule:
+    - cron: '0 * * * *'  # Hourly at :00
 
 jobs:
-  run:
+  verify:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - name: Verify Secrets
+        run: |
+          echo "Token exists: ${{ secrets.TELEGRAM_TOKEN != '' }}"
+          echo "Chat ID exists: ${{ secrets.CHAT_ID != '' }}"
+      
+      - uses: actions/setup-python@v4
         with:
           python-version: "3.10"
           
-      - name: Install dependencies
-        run: pip install python-telegram-bot==13.7 yfinance pandas
+      - run: pip install python-telegram-bot==13.7
       
-      - name: Run bot
-        run: python trading_bot.py
+      - run: python trading_bot.py
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
