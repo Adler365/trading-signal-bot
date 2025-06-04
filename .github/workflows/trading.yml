@@ -1,8 +1,8 @@
-name: Telegram Bot Test
+name: Telegram Test
 on: 
   workflow_dispatch:
   schedule:
-    - cron: '0 * * * *'  # Hourly at :00
+    - cron: '0 * * * *'
 
 jobs:
   verify:
@@ -10,16 +10,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Verify Secrets
+      - name: Debug Secrets
         run: |
           echo "Token exists: ${{ secrets.TELEGRAM_TOKEN != '' }}"
-          echo "Chat ID exists: ${{ secrets.CHAT_ID != '' }}"
+          echo "Token preview: ${{ secrets.TELEGRAM_TOKEN != '' && '***' + secrets.TELEGRAM_TOKEN[:3] + '...' + secrets.TELEGRAM_TOKEN[-3:] + '***' || 'NOT SET' }}"
       
       - uses: actions/setup-python@v4
         with:
           python-version: "3.10"
           
-      - run: pip install python-telegram-bot==13.7
+      - run: pip install python-telegram-bot==20.3
       
       - run: python trading_bot.py
         env:
