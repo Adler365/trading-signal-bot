@@ -13,7 +13,7 @@ jobs:
       - name: Debug Secrets
         run: |
           echo "Token exists: ${{ secrets.TELEGRAM_TOKEN != '' }}"
-          echo "Token preview: ${{ secrets.TELEGRAM_TOKEN != '' && '***' + secrets.TELEGRAM_TOKEN[:3] + '...' + secrets.TELEGRAM_TOKEN[-3:] + '***' || 'NOT SET' }}"
+          echo "Token preview: ${{ format('{0}...{1}', secrets.TELEGRAM_TOKEN[:3], secrets.TELEGRAM_TOKEN[-3:]) if secrets.TELEGRAM_TOKEN != '' else 'NOT SET' }}"
       
       - uses: actions/setup-python@v4
         with:
