@@ -10,7 +10,7 @@ jobs:
       - name: Debug Secrets
         run: |
           echo "Token exists: ${{ secrets.TELEGRAM_TOKEN != '' }}"
-          echo "Token starts with: ${{ secrets.TELE_TOKEN != '' && secrets.TELEGRAM_TOKEN[:3] || 'NONE' }}"
+          echo "Token starts with: ${{ (secrets.TELEGRAM_TOKEN && secrets.TELEGRAM_TOKEN[:3]) || 'NONE' }}"
           echo "Chat ID exists: ${{ secrets.CHAT_ID != '' }}"
       
       - uses: actions/setup-python@v4
